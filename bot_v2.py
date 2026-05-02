@@ -115,7 +115,7 @@ async def start_web_server():
     app.router.add_get("/", health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Servidor web corriendo en puerto {port}")
