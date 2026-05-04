@@ -3,18 +3,14 @@ sys.stdout.reconfigure(line_buffering=True)
 
 import asyncio
 import aiohttp
-import smtplib
 import re
 import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from aiohttp import web
 
-USER_TOKEN     = os.environ.get("USER_TOKEN")
-GMAIL_SENDER   = os.environ.get("GMAIL_SENDER")
-GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
-EMAIL_DESTINO  = os.environ.get("EMAIL_DESTINO")
+USER_TOKEN        = os.environ.get("USER_TOKEN")
+SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY")
+EMAIL_DESTINO     = os.environ.get("EMAIL_DESTINO")
 
 CHANNEL_IDS = {
     "resale-category-1": os.environ.get("CHANNEL_ID_1"),
@@ -26,7 +22,7 @@ CHANNEL_IDS = {
 ALERTAS = {
     70:  750,
     84:  400,
-    86:  3000,
+    86:  1700,
     95:  750,
     102: 400,
     104: 1000,
@@ -35,10 +31,9 @@ ALERTAS = {
 INTERVALO = 60
 alertas_enviadas = {}
 
-def enviar_email(match, categoria, precio, umbral):
+async def enviar_email(match, categoria, precio, umbral):
     asunto = f"ALERTA FIFA WC26 - Match {match} Cat {categoria}: USD {precio}"
-    cuerpo = f"""
-Aparecio una entrada barata!
+    cuerpo = f"""Aparecio una entrada barata!
 
 Match: {match}
 Categoria: {categoria}
@@ -47,18 +42,27 @@ Tu umbral: USD {umbral}
 Detectado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 Entra rapido a la FIFA Resale Shop:
-https://www.fifa.com/tickets/resale
-    """
+https://www.fifa.com/tickets/resale"""
+
+    payload = {
+        "personalizations": [{"to": [{"email": EMAIL_DESTINO}]}],
+        "from": {"email": EMAIL_DESTINO},
+        "subject": asunto,
+        "content": [{"type": "text/plain", "value": cuerpo}]
+    }
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json"
+    }
     try:
-        msg = MIMEMultipart()
-        msg["From"]    = GMAIL_SENDER
-        msg["To"]      = EMAIL_DESTINO
-        msg["Subject"] = asunto
-        msg.attach(MIMEText(cuerpo, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_SENDER, GMAIL_PASSWORD)
-            server.sendmail(GMAIL_SENDER, EMAIL_DESTINO, msg.as_string())
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Email enviado - Match {match} Cat {categoria}: USD {precio}")
+        async with aiohttp.ClientSession() as s:
+            async with s.post("https://api.sendgrid.com/v3/mail/send",
+                              json=payload, headers=headers) as resp:
+                if resp.status == 202:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Email enviado - Match {match} Cat {categoria}: USD {precio}")
+                else:
+                    text = await resp.text()
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Error SendGrid {resp.status}: {text}")
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Error enviando email: {e}")
 
@@ -129,7 +133,7 @@ async def chequear_canal(session, canal_nombre, channel_id):
                 if precio_actual <= umbral:
                     if alertas_enviadas.get(clave) != precio_actual:
                         alertas_enviadas[clave] = precio_actual
-                        enviar_email(num_partido, categoria, precio_actual, umbral)
+                        await enviar_email(num_partido, categoria, precio_actual, umbral)
                 else:
                     alertas_enviadas.pop(clave, None)
 
